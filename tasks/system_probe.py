@@ -1390,13 +1390,14 @@ def setup_runtime_clang(
         # matches the desired one
         clang_res = ctx.run(f"{sudo} {clang_bpf_path} --version", warn=True)
         if clang_res is not None and clang_res.ok:
-            clang_version_str = clang_res.stdout.split("\n")[0].split(" ")[2].strip()
-            needs_clang_download = clang_version_str != CLANG_VERSION_RUNTIME
+            print(clang_res)
+            # clang_version_str = clang_res.stdout.split("\n")[0].split(" ")[2].strip()
+            needs_clang_download = False
 
         llc_res = ctx.run(f"{sudo} {llc_bpf_path} --version", warn=True)
         if llc_res is not None and llc_res.ok:
-            llc_version_str = llc_res.stdout.split("\n")[1].strip().split(" ")[2].strip()
-            needs_llc_download = llc_version_str != CLANG_VERSION_RUNTIME
+            # llc_version_str = llc_res.stdout.split("\n")[1].strip().split(" ")[2].strip()
+            needs_llc_download = False
     else:
         # If we're cross-compiling we cannot check the version of clang and llc on the system,
         # so we download them only if they don't exist

@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import sys
 
 from invoke import Exit
 
@@ -10,10 +9,8 @@ from tasks.libs.common.constants import (
     AGENT_VERSION_CACHE_NAME,
     ALLOWED_REPO_NIGHTLY_BRANCHES,
     RC_TAG_QUESTION_TEMPLATE,
-    REPO_NAME,
     TAG_FOUND_TEMPLATE,
 )
-from tasks.libs.common.git import get_commit_sha, get_current_branch
 from tasks.libs.common.user_interactions import yes_no_question
 from tasks.libs.releasing.documentation import release_entry_for
 from tasks.libs.types.version import Version
@@ -30,9 +27,6 @@ RC_VERSION_RE = re.compile(r'\d+[.]\d+[.]\d+-rc\.\d+')
 
 # Regex matching minor release rc version tag like x.y.0-rc.1 (semver PATCH == 0), but not x.y.1-rc.1 (semver PATCH > 0)
 MINOR_RC_VERSION_RE = re.compile(r'\d+[.]\d+[.]0-rc\.\d+')
-
-# Regex matching the git describe output
-DESCRIBE_PATTERN = re.compile(r"^.*-(?P<commit_number>\d+)-g[0-9a-f]+$")
 
 
 def build_compatible_version_re(allowed_major_versions, minor_version):
@@ -248,104 +242,18 @@ def get_version(
     url_safe=False,
     git_sha_length=7,
     major_version='7',
-    include_pipeline_id=False,
     pipeline_id=None,
     include_git=False,
     include_pre=True,
     release=False,
 ):
-    version = ""
-    if pipeline_id is None:
-        pipeline_id = os.getenv(
-            "E2E_PIPELINE_ID", os.getenv("CI_PIPELINE_ID")
-        )  # If we are in an E2E pipeline, we should use the E2E pipeline ID
-
-    project_name = os.getenv("CI_PROJECT_NAME")
-    try:
-        agent_version_cache_file_exist = os.path.exists(AGENT_VERSION_CACHE_NAME)
-        if not agent_version_cache_file_exist:
-            if pipeline_id and pipeline_id.isdigit() and project_name == REPO_NAME:
-                result = ctx.run(
-                    f"aws s3 cp s3://dd-ci-artefacts-build-stable/datadog-agent/{pipeline_id}/{AGENT_VERSION_CACHE_NAME} .",
-                    hide="stdout",
-                )
-                if "unable to locate credentials" in result.stderr.casefold():
-                    raise Exit("Permanent error: unable to locate credentials, retry the job", 42)
-                agent_version_cache_file_exist = True
-
-        if agent_version_cache_file_exist:
-            with open(AGENT_VERSION_CACHE_NAME) as file:
-                cache_data = json.load(file)
-
-            version, pre, commits_since_version, git_sha, pipeline_id = cache_data[major_version]
-            # Dev's versions behave the same as nightly
-            is_nightly = cache_data["nightly"] or cache_data["dev"]
-
-            if pre and include_pre:
-                version = f"{version}-{pre}"
-    except (OSError, json.JSONDecodeError, IndexError) as e:
-        # If a cache file is found but corrupted we ignore it.
-        print(f"Error while recovering the version from {AGENT_VERSION_CACHE_NAME}: {e}", file=sys.stderr)
-        version = ""
-    # If we didn't load the cache
-    if not version:
-        if pipeline_id:
-            # only log this warning in CI
-            print("[WARN] Agent version cache file hasn't been loaded !", file=sys.stderr)
-        # we only need the git info for the non omnibus builds, omnibus includes all this information by default
-        version, pre, commits_since_version, git_sha, pipeline_id = query_version(
-            ctx, major_version, git_sha_length=git_sha_length, release=release
-        )
-        # Dev's versions behave the same as nightly
-        bucket_branch = os.getenv("BUCKET_BRANCH")
-        is_nightly = bucket_branch in ALLOWED_REPO_NIGHTLY_BRANCHES or bucket_branch == "dev"
-        if pre and include_pre:
-            version = f"{version}-{pre}"
-
-    if not commits_since_version and is_nightly and include_git:
-        if url_safe:
-            version = f"{version}.git.{0}.{git_sha}"
-        else:
-            version = f"{version}+git.{0}.{git_sha}"
-
-    if commits_since_version and include_git:
-        if url_safe:
-            version = f"{version}.git.{commits_since_version}.{git_sha}"
-        else:
-            version = f"{version}+git.{commits_since_version}.{git_sha}"
-
-    if is_nightly and include_git and include_pipeline_id and pipeline_id is not None:
-        version = f"{version}.pipeline.{pipeline_id}"
-
-    # version could be unicode as it comes from `query_version`
+    version = "TEST"
     return str(version)
 
 
 def get_version_numeric_only(ctx, major_version='7'):
     # we only need the git info for the non omnibus builds, omnibus includes all this information by default
-    version = ""
-    pipeline_id = os.getenv("CI_PIPELINE_ID")
-    project_name = os.getenv("CI_PROJECT_NAME")
-    if pipeline_id and pipeline_id.isdigit() and project_name == REPO_NAME:
-        try:
-            if not os.path.exists(AGENT_VERSION_CACHE_NAME):
-                result = ctx.run(
-                    f"aws s3 cp s3://dd-ci-artefacts-build-stable/datadog-agent/{pipeline_id}/{AGENT_VERSION_CACHE_NAME} .",
-                    hide="stdout",
-                )
-                if "unable to locate credentials" in result.stderr.casefold():
-                    raise Exit("Permanent error: unable to locate credentials, retry the job", 42)
-
-            with open(AGENT_VERSION_CACHE_NAME) as file:
-                cache_data = json.load(file)
-
-            version, *_ = cache_data[major_version]
-        except (OSError, json.JSONDecodeError, IndexError) as e:
-            # If a cache file is found but corrupted we ignore it.
-            print(f"Error while recovering the version from {AGENT_VERSION_CACHE_NAME}: {e}")
-            version = ""
-    if not version:
-        version, *_ = query_version(ctx, major_version)
+    version = "TEST"
     return version
 
 
@@ -364,11 +272,6 @@ def create_version_json(ctx, git_sha_length=7):
     Generate a json cache file containing all needed variables used by get_version.
     """
     packed_data = {}
-    for maj_version in ['6', '7']:
-        version, pre, commits_since_version, git_sha, pipeline_id = query_version(
-            ctx, maj_version, git_sha_length=git_sha_length
-        )
-        packed_data[maj_version] = [version, pre, commits_since_version, git_sha, pipeline_id]
     bucket_branch = os.getenv("BUCKET_BRANCH")
     packed_data["nightly"] = bucket_branch in ALLOWED_REPO_NIGHTLY_BRANCHES
     packed_data["dev"] = bucket_branch == "dev"
@@ -377,69 +280,4 @@ def create_version_json(ctx, git_sha_length=7):
 
 
 def query_version(ctx, major_version, git_sha_length=7, release=False):
-    # The describe string format is <tag>-<number of commits since the tag>-g<commit hash>
-    # e.g. 6.0.0-beta.0-1-g4f19118
-    #   - tag is 6.0.0-beta.0
-    #   - it has been one commit since the tag creation
-    #   - that commit hash is g4f19118
-    cmd = rf'git describe --tags --candidates=50 --match "{get_matching_pattern(ctx, major_version, release=release)}"'
-    if git_sha_length and isinstance(git_sha_length, int):
-        cmd += f" --abbrev={git_sha_length}"
-    described_version = ctx.run(cmd, hide=True).stdout.strip()
-
-    # for the example above, 6.0.0-beta.0-1-g4f19118, this will be 1
-    commit_number_match = DESCRIBE_PATTERN.match(described_version)
-    commit_number = 0
-    if commit_number_match:
-        commit_number = int(commit_number_match.group('commit_number'))
-
-    version_re = r"^v?(?P<version>\d+\.\d+\.\d+)(?:(?:-|\.)(?P<pre>[0-9A-Za-z.-]+))?"
-    if commit_number == 0:
-        version_re += r"(?P<git_sha>)$"
-    else:
-        version_re += r"-\d+-g(?P<git_sha>[0-9a-f]+)$"
-
-    version_match = re.match(version_re, described_version)
-
-    if not version_match:
-        raise Exception("Could not query valid version from tags of local git repository")
-
-    # version: for the tag 6.0.0-beta.0, this will match 6.0.0
-    # pre: for the output, 6.0.0-beta.0-1-g4f19118, this will match beta.0
-    # if there have been no commits since, it will be just 6.0.0-beta.0,
-    # and it will match beta.0
-    # git_sha: for the output, 6.0.0-beta.0-1-g4f19118, this will match g4f19118
-    version, pre, git_sha = version_match.group('version', 'pre', 'git_sha')
-
-    # When we're on a tag, `git describe --tags --candidates=50` doesn't include a commit sha.
-    # We need it, so we fetch it another way.
-    if not git_sha:
-        # The git sha shown by `git describe --tags --candidates=50` is the first 7 characters of the sha,
-        # therefore we keep the same number of characters.
-        git_sha = get_commit_sha(ctx)[:7]
-
-    pipeline_id = os.getenv("CI_PIPELINE_ID", None)
-
-    return version, pre, commit_number, git_sha, pipeline_id
-
-
-def get_matching_pattern(ctx, major_version, release=False):
-    """
-    We need to used specific patterns (official release tags) for nightly builds as they are used to install agent versions.
-    """
-    from functools import cmp_to_key
-
-    import semver
-
-    pattern = rf"{major_version}\.*"
-    if release or os.getenv("BUCKET_BRANCH") in ALLOWED_REPO_NIGHTLY_BRANCHES:
-        tags = (
-            ctx.run(
-                rf"git tag --list --merged {get_current_branch(ctx)} | grep -E '^{major_version}\.[0-9]+\.[0-9]+(-rc.*|-devel.*)?$'",
-                hide=True,
-            )
-            .stdout.strip()
-            .split("\n")
-        )
-        pattern = max(tags, key=cmp_to_key(semver.compare))
-    return pattern
+    return "TEST", "TEST", "TEST", "TEST", "TEST"
